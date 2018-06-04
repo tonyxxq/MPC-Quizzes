@@ -10,9 +10,9 @@ namespace plt = matplotlibcpp;
 
 using CppAD::AD;
 
-// TODO: Set N and dt
-size_t N = ? ;
-double dt = ? ;
+// 设置预测状态点的个数和状态点之间的时间间隔
+size_t N = 25 ;
+double dt = 0.05 ;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -24,6 +24,7 @@ double dt = ? ;
 // presented in the classroom matched the previous radius.
 //
 // This is the length from front to CoG that has a similar radius.
+// 设置汽车头到重心的距离
 const double Lf = 2.67;
 
 // NOTE: feel free to play around with this
@@ -33,6 +34,7 @@ double ref_v = 40;
 // The solver takes all the state variables and actuator
 // variables in a singular vector. Thus, we should to establish
 // when one variable starts and another ends to make our lifes easier.
+// solver使用的是一个向量存储所有的状态值，所以需要确定每个变量的开始位置
 size_t x_start = 0;
 size_t y_start = x_start + N;
 size_t psi_start = y_start + N;
@@ -46,6 +48,7 @@ class FG_eval {
  public:
   Eigen::VectorXd coeffs;
   // Coefficients of the fitted polynomial.
+  // 方程的系数
   FG_eval(Eigen::VectorXd coeffs) { this->coeffs = coeffs; }
 
   typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
@@ -55,6 +58,27 @@ class FG_eval {
     // The cost is stored is the first element of `fg`.
     // Any additions to the cost should be added to `fg[0]`.
     fg[0] = 0;
+    // Cost function
+	// TODO: Define the cost related the reference state and
+	// any anything you think may be beneficial.
+	// The part of the cost based on the reference state.
+	for (int t = 0; t < N; t++) {
+		fg[0] += CppAD::pow(vars[cte_start + t], 2);
+		fg[0] += CppAD::pow(vars[epsi_start + t], 2);
+		fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
+	}
+
+	// Minimize the use of actuators.
+	for (int t = 0; t < N - 1; t++) {
+		fg[0] += CppAD::pow(vars[delta_start + t], 2);
+		fg[0] += CppAD::pow(vars[a_start + t], 2);
+	}
+
+	// Minimize the value gap between sequential actuations.
+	for (int t = 0; t < N - 2; t++) {
+		fg[0] += CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+		fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+	}
 
     // Reference State Cost
     // TODO: Define the cost related the reference state and
@@ -79,21 +103,45 @@ class FG_eval {
 
     // The rest of the constraints
     for (int t = 1; t < N; t++) {
+      // The state at time t+1 .
       AD<double> x1 = vars[x_start + t];
+      AD<double> y1 = vars[y_start + t];
+      AD<double> psi1 = vars[psi_start + t];
+      AD<double> v1 = vars[v_start + t];
+      AD<double> cte1 = vars[cte_start + t];
+      AD<double> epsi1 = vars[epsi_start + t];
 
+      // The state at time t.
       AD<double> x0 = vars[x_start + t - 1];
+      AD<double> y0 = vars[y_start + t - 1];
       AD<double> psi0 = vars[psi_start + t - 1];
       AD<double> v0 = vars[v_start + t - 1];
+      AD<double> cte0 = vars[cte_start + t - 1];
+      AD<double> epsi0 = vars[epsi_start + t - 1];
+
+      // Only consider the actuation at time t.
+      AD<double> delta0 = vars[delta_start + t - 1];
+      AD<double> a0 = vars[a_start + t - 1];
+
+      AD<double> f0 = coeffs[0] + coeffs[1] * x0;
+      AD<double> psides0 = CppAD::atan(coeffs[1]);
 
       // Here's `x` to get you started.
       // The idea here is to constraint this value to be 0.
       //
-      // NOTE: The use of `AD<double>` and use of `CppAD`!
-      // This is also CppAD can compute derivatives and pass
-      // these to the solver.
-
-      // TODO: Setup the rest of the model constraints
+      // Recall the equations for the model:
+      // x_[t] = x[t-1] + v[t-1] * cos(psi[t-1]) * dt
+      // y_[t] = y[t-1] + v[t-1] * sin(psi[t-1]) * dt
+      // psi_[t] = psi[t-1] + v[t-1] / Lf * delta[t-1] * dt
+      // v_[t] = v[t-1] + a[t-1] * dt
+      // cte[t] = f(x[t-1]) - y[t-1] + v[t-1] * sin(epsi[t-1]) * dt
+      // epsi[t] = psi[t] - psides[t-1] + v[t-1] * delta[t-1] / Lf * dt
       fg[1 + x_start + t] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
+      fg[1 + y_start + t] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
+      fg[1 + psi_start + t] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
+      fg[1 + v_start + t] = v1 - (v0 + a0 * dt);
+      fg[1 + cte_start + t] = cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
+      fg[1 + epsi_start + t] = epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
     }
   }
 };
@@ -263,7 +311,7 @@ int main() {
   ptsy << -1, -1;
 
   // TODO: fit a polynomial to the above x and y coordinates
-  auto coeffs = ? ;
+  auto coeffs = polyfit(ptsx, ptsy, 1);
 
   // NOTE: free feel to play around with these
   double x = -1;
@@ -271,9 +319,9 @@ int main() {
   double psi = 0;
   double v = 10;
   // TODO: calculate the cross track error
-  double cte = ? ;
+  double cte = polyeval(coeffs, x) - y;
   // TODO: calculate the orientation error
-  double epsi = ? ;
+  double epsi = psi - atan(coeffs[1]);
 
   Eigen::VectorXd state(6);
   state << x, y, psi, v, cte, epsi;
