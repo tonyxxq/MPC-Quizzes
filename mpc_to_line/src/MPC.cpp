@@ -11,8 +11,8 @@ namespace plt = matplotlibcpp;
 using CppAD::AD;
 
 // 设置预测状态点的个数和状态点之间的时间间隔
-size_t N = 25 ;
-double dt = 0.05 ;
+size_t N = 25;
+double dt = 0.05;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -23,18 +23,13 @@ double dt = 0.05 ;
 // Lf was tuned until the the radius formed by the simulating the model
 // presented in the classroom matched the previous radius.
 //
-// This is the length from front to CoG that has a similar radius.
-// 设置汽车头到重心的距离
+// 设置汽车头到車重心的距离
 const double Lf = 2.67;
 
-// NOTE: feel free to play around with this
-// or do something completely different
+// 參考速度，爲了使車輛不停止或速度太大，把當前值減去該值得到cost
 double ref_v = 40;
 
-// The solver takes all the state variables and actuator
-// variables in a singular vector. Thus, we should to establish
-// when one variable starts and another ends to make our lifes easier.
-// solver使用的是一个向量存储所有的状态值，所以需要确定每个变量的开始位置
+// solver使用的是一个向量存储所有的状态值，所以需要确定每種变量的开始位置
 size_t x_start = 0;
 size_t y_start = x_start + N;
 size_t psi_start = y_start + N;
@@ -46,64 +41,46 @@ size_t a_start = delta_start + N - 1;
 
 class FG_eval {
  public:
-  Eigen::VectorXd coeffs;
-  // Coefficients of the fitted polynomial.
+
   // 方程的系数
+  Eigen::VectorXd coeffs;
   FG_eval(Eigen::VectorXd coeffs) { this->coeffs = coeffs; }
 
   typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
-  // `fg` is a vector containing the cost and constraints.
-  // `vars` is a vector containing the variable values (state & actuators).
+
+  // fg向量包含的是總損失和約束，vars向量包含的是變量值和驅動器的輸入
   void operator()(ADvector& fg, const ADvector& vars) {
-    // The cost is stored is the first element of `fg`.
-    // Any additions to the cost should be added to `fg[0]`.
-    fg[0] = 0;
-    // Cost function
-	// TODO: Define the cost related the reference state and
-	// any anything you think may be beneficial.
-	// The part of the cost based on the reference state.
+	// 任何cost都會加到fg[0]
+	fg[0] = 0;
 	for (int t = 0; t < N; t++) {
 		fg[0] += CppAD::pow(vars[cte_start + t], 2);
 		fg[0] += CppAD::pow(vars[epsi_start + t], 2);
 		fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
 	}
 
-	// Minimize the use of actuators.
+	// 使車輛運行更平穩，盡量減少驅動器的輸入
 	for (int t = 0; t < N - 1; t++) {
 		fg[0] += CppAD::pow(vars[delta_start + t], 2);
 		fg[0] += CppAD::pow(vars[a_start + t], 2);
 	}
 
-	// Minimize the value gap between sequential actuations.
+	// 爲了使車輛更平滑，減少相鄰兩次驅動器的輸入
 	for (int t = 0; t < N - 2; t++) {
 		fg[0] += CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
 		fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
 	}
 
-    // Reference State Cost
-    // TODO: Define the cost related the reference state and
-    // any anything you think may be beneficial.
-
-    //
-    // Setup Constraints
-    //
-    // NOTE: In this section you'll setup the model constraints.
-
-    // Initial constraints
-    //
-    // We add 1 to each of the starting indices due to cost being located at
-    // index 0 of `fg`.
-    // This bumps up the position of all the other values.
-    fg[1 + x_start] = vars[x_start];
+    // 設置fg的初始值
+	fg[1 + x_start] = vars[x_start];
     fg[1 + y_start] = vars[y_start];
     fg[1 + psi_start] = vars[psi_start];
     fg[1 + v_start] = vars[v_start];
     fg[1 + cte_start] = vars[cte_start];
     fg[1 + epsi_start] = vars[epsi_start];
 
-    // The rest of the constraints
+    // 其他的約束條件
     for (int t = 1; t < N; t++) {
-      // The state at time t+1 .
+      // t+1時刻的狀態
       AD<double> x1 = vars[x_start + t];
       AD<double> y1 = vars[y_start + t];
       AD<double> psi1 = vars[psi_start + t];
@@ -111,7 +88,7 @@ class FG_eval {
       AD<double> cte1 = vars[cte_start + t];
       AD<double> epsi1 = vars[epsi_start + t];
 
-      // The state at time t.
+      // t時刻的狀態
       AD<double> x0 = vars[x_start + t - 1];
       AD<double> y0 = vars[y_start + t - 1];
       AD<double> psi0 = vars[psi_start + t - 1];
@@ -119,23 +96,15 @@ class FG_eval {
       AD<double> cte0 = vars[cte_start + t - 1];
       AD<double> epsi0 = vars[epsi_start + t - 1];
 
-      // Only consider the actuation at time t.
+      // 僅考慮在t時刻的驅動器輸入
       AD<double> delta0 = vars[delta_start + t - 1];
       AD<double> a0 = vars[a_start + t - 1];
 
+      // t時刻的距離和角度值
       AD<double> f0 = coeffs[0] + coeffs[1] * x0;
       AD<double> psides0 = CppAD::atan(coeffs[1]);
 
-      // Here's `x` to get you started.
-      // The idea here is to constraint this value to be 0.
-      //
-      // Recall the equations for the model:
-      // x_[t] = x[t-1] + v[t-1] * cos(psi[t-1]) * dt
-      // y_[t] = y[t-1] + v[t-1] * sin(psi[t-1]) * dt
-      // psi_[t] = psi[t-1] + v[t-1] / Lf * delta[t-1] * dt
-      // v_[t] = v[t-1] + a[t-1] * dt
-      // cte[t] = f(x[t-1]) - y[t-1] + v[t-1] * sin(epsi[t-1]) * dt
-      // epsi[t] = psi[t] - psides[t-1] + v[t-1] * delta[t-1] / Lf * dt
+      // 約束條件
       fg[1 + x_start + t] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
       fg[1 + y_start + t] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
       fg[1 + psi_start + t] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
@@ -146,9 +115,7 @@ class FG_eval {
   }
 };
 
-//
 // MPC class definition
-//
 
 MPC::MPC() {}
 MPC::~MPC() {}
@@ -164,19 +131,16 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
   double cte = x0[4];
   double epsi = x0[5];
 
-  // number of independent variables
-  // N timesteps == N - 1 actuations
+  // 獨立變量的個數，注意：驅動器輸入（N - 1）* 2
   size_t n_vars = N * 6 + (N - 1) * 2;
-  // Number of constraints
+  // 約束條件的個數
   size_t n_constraints = N * 6;
 
-  // Initial value of the independent variables.
-  // Should be 0 except for the initial values.
+  // 除了初始值，初始化每一個變量爲0
   Dvector vars(n_vars);
   for (int i = 0; i < n_vars; i++) {
     vars[i] = 0.0;
   }
-  // Set the initial variable values
   vars[x_start] = x;
   vars[y_start] = y;
   vars[psi_start] = psi;
@@ -184,35 +148,26 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
   vars[cte_start] = cte;
   vars[epsi_start] = epsi;
 
-  // Lower and upper limits for x
+  // 設置每一個變量的最大和最小值
+  // 【1】設置非驅動輸入的最大和最小值
+  // 【2】設置方向轉動的角度範圍爲-25—25度
+  // 【3】加速度的範圍爲-1—1
   Dvector vars_lowerbound(n_vars);
   Dvector vars_upperbound(n_vars);
-
-  // Set all non-actuators upper and lowerlimits
-  // to the max negative and positive values.
   for (int i = 0; i < delta_start; i++) {
     vars_lowerbound[i] = -1.0e19;
     vars_upperbound[i] = 1.0e19;
   }
-
-  // The upper and lower limits of delta are set to -25 and 25
-  // degrees (values in radians).
-  // NOTE: Feel free to change this to something else.
   for (int i = delta_start; i < a_start; i++) {
     vars_lowerbound[i] = -0.436332;
     vars_upperbound[i] = 0.436332;
   }
-
-  // Acceleration/decceleration upper and lower limits.
-  // NOTE: Feel free to change this to something else.
   for (int i = a_start; i < n_vars; i++) {
     vars_lowerbound[i] = -1.0;
     vars_upperbound[i] = 1.0;
   }
 
-  // Lower and upper limits for constraints
-  // All of these should be 0 except the initial
-  // state indices.
+  // 設置約束條件的最大和最小值，除了初始狀態其他的約束都爲0
   Dvector constraints_lowerbound(n_constraints);
   Dvector constraints_upperbound(n_constraints);
   for (int i = 0; i < n_constraints; i++) {
@@ -310,22 +265,20 @@ int main() {
   ptsx << -100, 100;
   ptsy << -1, -1;
 
-  // TODO: fit a polynomial to the above x and y coordinates
+  // 求得方程系數值
   auto coeffs = polyfit(ptsx, ptsy, 1);
 
-  // NOTE: free feel to play around with these
+  // 初始狀態
   double x = -1;
   double y = 10;
   double psi = 0;
   double v = 10;
-  // TODO: calculate the cross track error
   double cte = polyeval(coeffs, x) - y;
-  // TODO: calculate the orientation error
   double epsi = psi - atan(coeffs[1]);
-
   Eigen::VectorXd state(6);
   state << x, y, psi, v, cte, epsi;
 
+  // 記錄每一次擬合的變量
   std::vector<double> x_vals = {state[0]};
   std::vector<double> y_vals = {state[1]};
   std::vector<double> psi_vals = {state[2]};
@@ -337,7 +290,7 @@ int main() {
 
   for (size_t i = 0; i < iters; i++) {
     std::cout << "Iteration " << i << std::endl;
-
+    // 計算出的變量值
     auto vars = mpc.Solve(state, coeffs);
 
     x_vals.push_back(vars[0]);
@@ -346,10 +299,10 @@ int main() {
     v_vals.push_back(vars[3]);
     cte_vals.push_back(vars[4]);
     epsi_vals.push_back(vars[5]);
-
     delta_vals.push_back(vars[6]);
     a_vals.push_back(vars[7]);
 
+    // 把計算出的狀態作爲參數傳遞給下一次的擬合
     state << vars[0], vars[1], vars[2], vars[3], vars[4], vars[5];
     std::cout << "x = " << vars[0] << std::endl;
     std::cout << "y = " << vars[1] << std::endl;
