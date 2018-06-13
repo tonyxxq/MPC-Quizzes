@@ -14,15 +14,6 @@ using CppAD::AD;
 size_t N = 25;
 double dt = 0.05;
 
-// This value assumes the model presented in the classroom is used.
-//
-// It was obtained by measuring the radius formed by running the vehicle in the
-// simulator around in a circle with a constant steering angle and velocity on a
-// flat terrain.
-//
-// Lf was tuned until the the radius formed by the simulating the model
-// presented in the classroom matched the previous radius.
-//
 // 设置汽车头到車重心的距离
 const double Lf = 2.67;
 
@@ -219,9 +210,7 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
           solution.x[delta_start],   solution.x[a_start]};
 }
 
-//
 // Helper functions to fit and evaluate polynomials.
-//
 
 // Evaluate a polynomial.
 double polyeval(Eigen::VectorXd coeffs, double x) {
@@ -235,8 +224,7 @@ double polyeval(Eigen::VectorXd coeffs, double x) {
 // Fit a polynomial.
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
-Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
-                        int order) {
+Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals, int order) {
   assert(xvals.size() == yvals.size());
   assert(order >= 1 && order <= xvals.size() - 1);
   Eigen::MatrixXd A(xvals.size(), order + 1);
@@ -315,9 +303,7 @@ int main() {
     std::cout << std::endl;
   }
 
-  // Plot values
-  // NOTE: feel free to play around with this.
-  // It's useful for debugging!
+  // 展示結果
   plt::subplot(3, 1, 1);
   plt::title("CTE");
   plt::plot(cte_vals);
