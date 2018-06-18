@@ -10,17 +10,17 @@ namespace plt = matplotlibcpp;
 
 using CppAD::AD;
 
-// 设置预测状态点的个数和状态点之间的时间间隔
+// 设置预测状态点的个数和两个相邻状态点之间的时间间隔
 size_t N = 25;
 double dt = 0.05;
 
-// 设置汽车头到車重心的距离
+// 设置汽车头到车辆重心之间的距离
 const double Lf = 2.67;
 
-// 參考速度，爲了使車輛不停止或速度太大，把當前值減去該值得到cost
+// 参考速度，为了避免车辆在行驶中停止
 double ref_v = 40;
 
-// solver使用的是一个向量存储所有的状态值，所以需要确定每種变量的开始位置
+// solver使用的是一个向量存储所有的状态值，所以需要确定每种状态在向量中的开始位置
 size_t x_start = 0;
 size_t y_start = x_start + N;
 size_t psi_start = y_start + N;
@@ -33,35 +33,36 @@ size_t a_start = delta_start + N - 1;
 class FG_eval {
  public:
 
-  // 方程的系数
+  // 参考路径方程的系数
   Eigen::VectorXd coeffs;
   FG_eval(Eigen::VectorXd coeffs) { this->coeffs = coeffs; }
 
   typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
 
-  // fg向量包含的是總損失和約束，vars向量包含的是變量值和驅動器的輸入
+  // 该函数的目的是定义约束，fg向量包含的是总损失和约束，vars向量包含的是状态值和驱动器的输入
   void operator()(ADvector& fg, const ADvector& vars) {
-	// 任何cost都會加到fg[0]
+	// 任何cost都会加到fg[0]
 	fg[0] = 0;
+    // 使车辆轨迹和参考路径的误差最小，且使车辆的速度尽量接近参考速度
 	for (int t = 0; t < N; t++) {
 		fg[0] += CppAD::pow(vars[cte_start + t], 2);
 		fg[0] += CppAD::pow(vars[epsi_start + t], 2);
 		fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
 	}
-
-	// 使車輛運行更平穩，盡量減少驅動器的輸入
+	// 使车辆行驶更平稳，尽量减少每一次驱动器的输入大小
+	// 注意：驱动器的输入是N-1个.最后一个点没有驱动器输入
 	for (int t = 0; t < N - 1; t++) {
 		fg[0] += CppAD::pow(vars[delta_start + t], 2);
 		fg[0] += CppAD::pow(vars[a_start + t], 2);
 	}
-
-	// 爲了使車輛更平滑，減少相鄰兩次驅動器的輸入
+	// 为了使车辆运动更平滑，尽量减少相邻两次驱动器输入的差距
+	// 注意：这个地方是N-2个
 	for (int t = 0; t < N - 2; t++) {
 		fg[0] += CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
 		fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
 	}
 
-    // 設置fg的初始值
+    // 设置fg的初始值为状态的初始值，这个地方为初始条件约束
 	fg[1 + x_start] = vars[x_start];
     fg[1 + y_start] = vars[y_start];
     fg[1 + psi_start] = vars[psi_start];
@@ -69,9 +70,9 @@ class FG_eval {
     fg[1 + cte_start] = vars[cte_start];
     fg[1 + epsi_start] = vars[epsi_start];
 
-    // 其他的約束條件
+    // 因为t=0初始条件约束已经有了，计算其他约束条件
     for (int t = 1; t < N; t++) {
-      // t+1時刻的狀態
+      // t+1时刻的状态
       AD<double> x1 = vars[x_start + t];
       AD<double> y1 = vars[y_start + t];
       AD<double> psi1 = vars[psi_start + t];
@@ -79,23 +80,22 @@ class FG_eval {
       AD<double> cte1 = vars[cte_start + t];
       AD<double> epsi1 = vars[epsi_start + t];
 
-      // t時刻的狀態
+      // t时刻的状态
       AD<double> x0 = vars[x_start + t - 1];
       AD<double> y0 = vars[y_start + t - 1];
       AD<double> psi0 = vars[psi_start + t - 1];
       AD<double> v0 = vars[v_start + t - 1];
       AD<double> cte0 = vars[cte_start + t - 1];
       AD<double> epsi0 = vars[epsi_start + t - 1];
-
-      // 僅考慮在t時刻的驅動器輸入
+      // t时刻的驱动器输入
       AD<double> delta0 = vars[delta_start + t - 1];
       AD<double> a0 = vars[a_start + t - 1];
 
-      // t時刻的距離和角度值
+      // t时刻参考路径的距离和角度值
       AD<double> f0 = coeffs[0] + coeffs[1] * x0;
       AD<double> psides0 = CppAD::atan(coeffs[1]);
 
-      // 約束條件
+      // 根据如上的状态值计算约束条件
       fg[1 + x_start + t] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
       fg[1 + y_start + t] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
       fg[1 + psi_start + t] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
@@ -107,7 +107,6 @@ class FG_eval {
 };
 
 // MPC class definition
-
 MPC::MPC() {}
 MPC::~MPC() {}
 
@@ -122,12 +121,12 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
   double cte = x0[4];
   double epsi = x0[5];
 
-  // 獨立變量的個數，注意：驅動器輸入（N - 1）* 2
+  // 独立状态的个数，注意：驱动器的输入（N - 1）* 2
   size_t n_vars = N * 6 + (N - 1) * 2;
-  // 約束條件的個數
+  // 约束条件的个数
   size_t n_constraints = N * 6;
 
-  // 除了初始值，初始化每一個變量爲0
+  // 除了初始值，初始化每一个状态为0
   Dvector vars(n_vars);
   for (int i = 0; i < n_vars; i++) {
     vars[i] = 0.0;
@@ -139,10 +138,10 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
   vars[cte_start] = cte;
   vars[epsi_start] = epsi;
 
-  // 設置每一個變量的最大和最小值
-  // 【1】設置非驅動輸入的最大和最小值
-  // 【2】設置方向轉動的角度範圍爲-25—25度
-  // 【3】加速度的範圍爲-1—1
+  // 设置每一个状态变量的最大和最小值
+  // 【1】设置非驱动输入的最大和最小值
+  // 【2】设置方向盘转动角度范围-25—25度
+  // 【3】加速度的范围-1—1
   Dvector vars_lowerbound(n_vars);
   Dvector vars_upperbound(n_vars);
   for (int i = 0; i < delta_start; i++) {
@@ -158,7 +157,7 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
     vars_upperbound[i] = 1.0;
   }
 
-  // 設置約束條件的最大和最小值，除了初始狀態其他的約束都爲0
+  // 设置约束条件的的最大和最小值，除了初始状态其他约束都为0
   Dvector constraints_lowerbound(n_constraints);
   Dvector constraints_upperbound(n_constraints);
   for (int i = 0; i < n_constraints; i++) {
@@ -191,7 +190,7 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
   // place to return solution
   CppAD::ipopt::solve_result<Dvector> solution;
 
-  // solve the problem
+  // 计算这个问题
   CppAD::ipopt::solve<Dvector, FG_eval>(
       options, vars, vars_lowerbound, vars_upperbound, constraints_lowerbound,
       constraints_upperbound, fg_eval, solution);
@@ -203,6 +202,7 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
   ok &= solution.status == CppAD::ipopt::solve_result<Dvector>::success;
 
   auto cost = solution.obj_value;
+  // 返回计算出的下一时刻预测出的路径的点状态
   std::cout << "Cost " << cost << std::endl;
   return {solution.x[x_start + 1],   solution.x[y_start + 1],
           solution.x[psi_start + 1], solution.x[v_start + 1],
@@ -212,7 +212,7 @@ vector<double> MPC::Solve(Eigen::VectorXd x0, Eigen::VectorXd coeffs) {
 
 // Helper functions to fit and evaluate polynomials.
 
-// Evaluate a polynomial.
+// 根据系数和输入值确定多项式的输出值
 double polyeval(Eigen::VectorXd coeffs, double x) {
   double result = 0.0;
   for (int i = 0; i < coeffs.size(); i++) {
@@ -221,7 +221,7 @@ double polyeval(Eigen::VectorXd coeffs, double x) {
   return result;
 }
 
-// Fit a polynomial.
+// 使用Qr分解计算多项式的系数
 // Adapted from
 // https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
 Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals, int order) {
@@ -246,17 +246,18 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals, int order)
 
 int main() {
   MPC mpc;
-  int iters = 50;
+  int iters = 500;// 迭代50次
 
+  // 生成两个点
   Eigen::VectorXd ptsx(2);
   Eigen::VectorXd ptsy(2);
   ptsx << -100, 100;
   ptsy << -1, -1;
 
-  // 求得方程系數值
+  // 根据如上的点，求得方程系数，作为参考路线
   auto coeffs = polyfit(ptsx, ptsy, 1);
 
-  // 初始狀態
+  // 初始状态
   double x = -1;
   double y = 10;
   double psi = 0;
@@ -266,7 +267,7 @@ int main() {
   Eigen::VectorXd state(6);
   state << x, y, psi, v, cte, epsi;
 
-  // 記錄每一次擬合的變量
+  // 记录每一次拟合的状态
   std::vector<double> x_vals = {state[0]};
   std::vector<double> y_vals = {state[1]};
   std::vector<double> psi_vals = {state[2]};
@@ -278,7 +279,7 @@ int main() {
 
   for (size_t i = 0; i < iters; i++) {
     std::cout << "Iteration " << i << std::endl;
-    // 計算出的變量值
+    // 计算出状态值
     auto vars = mpc.Solve(state, coeffs);
 
     x_vals.push_back(vars[0]);
@@ -290,8 +291,10 @@ int main() {
     delta_vals.push_back(vars[6]);
     a_vals.push_back(vars[7]);
 
-    // 把計算出的狀態作爲參數傳遞給下一次的擬合
+    // 把计算出的状态作为初始状态传给下一次拟合
     state << vars[0], vars[1], vars[2], vars[3], vars[4], vars[5];
+
+    // 输出当前拟合的状态值
     std::cout << "x = " << vars[0] << std::endl;
     std::cout << "y = " << vars[1] << std::endl;
     std::cout << "psi = " << vars[2] << std::endl;
@@ -303,7 +306,7 @@ int main() {
     std::cout << std::endl;
   }
 
-  // 展示結果
+  // 展示结果
   plt::subplot(3, 1, 1);
   plt::title("CTE");
   plt::plot(cte_vals);
